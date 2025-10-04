@@ -1,0 +1,892 @@
+import { config } from "dotenv";import { config } from "dotenv";
+
+import { randomBytes } from "node:crypto";import { randomBytes } from "node:crypto";
+
+import {import {
+
+  createThirdwebClient,  createThirdwebClient,
+
+  eth_estimateGas,  eth_estimateGas,
+
+  eth_getTransactionCount,  eth_getTransactionCount,
+
+  getAddress,  getAddress,
+
+  getRpcClient,  getRpcClient,
+
+  signAuthorization,  signAuthorization,
+
+} from "thirdweb";} from "thirdweb";
+
+import { baseSepolia } from "thirdweb/chains";import { baseSepolia } from "thirdweb/chains";
+
+import { privateKeyToAccount } from "thirdweb/wallets";import { privateKeyToAccount } from "thirdweb/wallets";
+
+import { padHex, toHex } from "thirdweb/utils";import { padHex, toHex } from "thirdweb/utils";
+
+
+
+config();config();
+
+
+
+const DEFAULT_CHAIN = baseSepolia;const DEFAULT_CHAIN = baseSepolia;
+
+const DEFAULT_MINIMAL_ACCOUNT = "0x3E515544F8d8293B0A353E10Ff3b7ca03b52f35b" as const;const DEFAULT_MINIMAL_ACCOUNT = "0x3E515544F8d8293B0A353E10Ff3b7ca03b52f35b" as const;
+
+
+
+type JsonRpcRequest = {type JsonRpcRequest = {
+
+  jsonrpc: "2.0";  jsonrpc: "2.0";
+
+  id: number;  id: number;
+
+  method: string;  method: string;
+
+  params?: unknown;  params?: unknown;
+
+};};
+
+
+
+type RelayerResult<T> = {type RelayerResult<T> = {
+
+  result?: T;  result?: T;
+
+  error?: { code: number; message: string };  error?: { code: number; message: string };
+
+};};
+
+
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+
+
+async function main() {async function main() {
+
+  // Setup  // Setup
+
+  const walletPrivateKey = process.env.WALLET_PRIVATE_KEY;  const walletPrivateKey = process.env.WALLET_PRIVATE_KEY;
+
+  const thirdwebSecret = process.env.THIRDWEB_SECRET_KEY;  const thirdwebSecret = process.env.THIRDWEB_SECRET_KEY;
+
+  if (!walletPrivateKey) throw new Error("Set WALLET_PRIVATE_KEY in your environment");  if (!walletPrivateKey) throw new Error("Set WALLET_PRIVATE_KEY in your environment");
+
+  if (!thirdwebSecret) throw new Error("Set THIRDWEB_SECRET_KEY in your environment");  if (!thirdwebSecret) throw new Error("Set THIRDWEB_SECRET_KEY in your environment");
+
+
+
+  const chain = DEFAULT_CHAIN;  const chain = DEFAULT_CHAIN;
+
+  const chainIdString = chain.id.toString();  const chainIdString = chain.id.toString();
+
+  const relayerUrl = `https://${chain.id}.bundler.thirdweb.com/v2`;  const relayerUrl = `https://${chain.id}.bundler.thirdweb.com/v2`;
+
+
+
+  console.log("Using relayer:", relayerUrl);  console.log("Using relayer:", relayerUrl);
+
+  console.log("Target chain:", `${chain.name} (${chain.id})`);  console.log("Target chain:", `${chain.name} (${chain.id})`);
+
+
+
+  const client = createThirdwebClient({ secretKey: thirdwebSecret });  const client = createThirdwebClient({ secretKey: thirdwebSecret });
+
+  const account = privateKeyToAccount({ client, privateKey: walletPrivateKey });  const account = privateKeyToAccount({ client, privateKey: walletPrivateKey });
+
+  const eoaAddress = getAddress(account.address);  const eoaAddress = getAddress(account.address);
+
+
+
+  // EIP-7702 Authorization: Delegate EOA to MinimalAccount contract  // EIP-7702 Authorization: Delegate EOA to MinimalAccount contract
+
+  const rpcClient = getRpcClient({ client, chain });  const rpcClient = getRpcClient({ client, chain });
+
+  const nonce = BigInt(await eth_getTransactionCount(rpcClient, { address: eoaAddress, blockTag: "pending" }));  const nonce = BigInt(await eth_getTransactionCount(rpcClient, { address: eoaAddress, blockTag: "pending" }));
+
+
+
+  const authorization = await signAuthorization({  const authorization = await signAuthorization({
+
+    account,    account,
+
+    request: { address: DEFAULT_MINIMAL_ACCOUNT, chainId: chain.id, nonce },    request: { address: DEFAULT_MINIMAL_ACCOUNT, chainId: chain.id, nonce },
+
+  });  });
+
+
+
+  const authorizationList: [[number, string, string, number, `0x${string}`, `0x${string}`]] = [  const authorizationList: [[number, string, string, number, `0x${string}`, `0x${string}`]] = [
+
+    [    [
+
+      authorization.chainId,      authorization.chainId,
+
+      authorization.address,      authorization.address,
+
+      authorization.nonce.toString(),      authorization.nonce.toString(),
+
+      authorization.yParity,      authorization.yParity,
+
+      padHex(toHex(authorization.r), { size: 32 }),      padHex(toHex(authorization.r), { size: 32 }),
+
+      padHex(toHex(authorization.s), { size: 32 }),      padHex(toHex(authorization.s), { size: 32 }),
+
+    ],    ],
+
+  ];  ];
+
+
+
+  // Query Relayer Capabilities  // Query Relayer Capabilities
+
+  const capabilities = await relayerRequest<  const capabilities = await relayerRequest<
+
+    Record<string, { feeCollector: string; tokens: Array<{ address: string; symbol: string; decimals: string }> }>    Record<string, { feeCollector: string; tokens: Array<{ address: string; symbol: string; decimals: string }> }>
+
+  >(relayerUrl, thirdwebSecret, "relayer_getCapabilities", []);  >(relayerUrl, thirdwebSecret, "relayer_getCapabilities", []);
+
+
+
+  const chainCapabilities = capabilities?.[chainIdString];  const chainCapabilities = capabilities?.[chainIdString];
+
+  if (!chainCapabilities) {  if (!chainCapabilities) {
+
+    throw new Error(`relayer_getCapabilities did not return config for chain ${chain.id}`);    throw new Error(`relayer_getCapabilities did not return config for chain ${chain.id}`);
+
+  }  }
+
+
+
+  console.log("Capabilities:");  console.log("Capabilities:");
+
+  console.table(chainCapabilities.tokens.map((token) => ({ address: token.address, symbol: token.symbol, decimals: token.decimals })));  console.table(chainCapabilities.tokens.map((token) => ({ address: token.address, symbol: token.symbol, decimals: token.decimals })));
+
+
+
+  const tokenForQuote = chainCapabilities.tokens[0];  const tokenForQuote = chainCapabilities.tokens[0];
+
+  if (tokenForQuote) {  if (tokenForQuote) {
+
+    const exchangeRate = await relayerRequest<    const exchangeRate = await relayerRequest<
+
+      Array<      Array<
+
+        | {        | {
+
+            quote: { rate: number; token: { address: string; decimals: number; symbol?: string; name?: string }; minFee?: number };            quote: { rate: number; token: { address: string; decimals: number; symbol?: string; name?: string }; minFee?: number };
+
+            chainId: string;            chainId: string;
+
+            gasPrice: string;            gasPrice: string;
+
+            feeCollector: string;            feeCollector: string;
+
+            expiry: number;            expiry: number;
+
+          }          }
+
+        | { error: { id: string; message: string } }        | { error: { id: string; message: string } }
+
+      >      >
+
+    >(relayerUrl, thirdwebSecret, "relayer_getExchangeRate", [{ chainId: chainIdString, token: tokenForQuote.address }]);    >(relayerUrl, thirdwebSecret, "relayer_getExchangeRate", [{ chainId: chainIdString, token: tokenForQuote.address }]);
+
+    console.log("Exchange rate sample:", JSON.stringify(exchangeRate, null, 2));    console.log("Exchange rate sample:", JSON.stringify(exchangeRate, null, 2));
+
+  } else {  } else {
+
+    console.warn("No ERC20 tokens configured for this chain; skipping quote");    console.warn("No ERC20 tokens configured for this chain; skipping quote");
+
+  }  }
+
+
+
+  // Example 1: Sponsored Transaction  // Example 1: Sponsored Transaction
+
+  console.log("\n=== Sponsored Transaction ===");  console.log("\n=== Sponsored Transaction ===");
+
+  
+
+  const wrappedUid = `0x${randomBytes(32).toString("hex")}` as `0x${string}`;  const wrappedUid = `0x${randomBytes(32).toString("hex")}` as `0x${string}`;
+
+  const wrappedCalls = {  const wrappedCalls = {
+
+    uid: wrappedUid,    uid: wrappedUid,
+
+    calls: [{ target: eoaAddress, data: "0x", value: "0" }],    calls: [{ target: eoaAddress, data: "0x", value: "0" }],
+
+  };  };
+
+
+
+  const signature = (await account.signTypedData({  const signature = (await account.signTypedData({
+
+    domain: { chainId: chain.id, name: "MinimalAccount", verifyingContract: eoaAddress, version: "1" },    domain: { chainId: chain.id, name: "MinimalAccount", verifyingContract: eoaAddress, version: "1" },
+
+    primaryType: "WrappedCalls",    primaryType: "WrappedCalls",
+
+    types: {    types: {
+
+      Call: [      Call: [
+
+        { name: "target", type: "address" },        { name: "target", type: "address" },
+
+        { name: "value", type: "uint256" },        { name: "value", type: "uint256" },
+
+        { name: "data", type: "bytes" },        { name: "data", type: "bytes" },
+
+      ],      ],
+
+      WrappedCalls: [      WrappedCalls: [
+
+        { name: "calls", type: "Call[]" },        { name: "calls", type: "Call[]" },
+
+        { name: "uid", type: "bytes32" },        { name: "uid", type: "bytes32" },
+
+      ],      ],
+
+    },    },
+
+    message: {    message: {
+
+      uid: wrappedUid,      uid: wrappedUid,
+
+      calls: [{ target: eoaAddress, data: "0x", value: BigInt(0) }],      calls: [{ target: eoaAddress, data: "0x", value: BigInt(0) }],
+
+    },    },
+
+  })) as `0x${string}`;  })) as `0x${string}`;
+
+
+
+  const sendResult = await relayerRequest<Array<{ chainId: string; id: string } | { error: { id: string; message: string } }>>(  const sendResult = await relayerRequest<Array<{ chainId: string; id: string } | { error: { id: string; message: string } }>>(
+
+    relayerUrl,    relayerUrl,
+
+    thirdwebSecret,    thirdwebSecret,
+
+    "relayer_sendTransaction",    "relayer_sendTransaction",
+
+    [    [
+
+      {      {
+
+        to: eoaAddress,        to: eoaAddress,
+
+        chainId: chainIdString,        chainId: chainIdString,
+
+        capabilities: { payment: { type: "sponsored" } },        capabilities: { payment: { type: "sponsored" } },
+
+        authorizationList,        authorizationList,
+
+        data: { wrappedCalls, signature },        data: { wrappedCalls, signature },
+
+      },      },
+
+    ]    ]
+
+  );  );
+
+
+
+  const sendEntry = sendResult?.[0];  const sendEntry = sendResult?.[0];
+
+  if (!sendEntry || "error" in sendEntry) {  if (!sendEntry || "error" in sendEntry) {
+
+    throw new Error(`relayer_sendTransaction failed: ${JSON.stringify(sendEntry, null, 2)}`);    throw new Error(`relayer_sendTransaction failed: ${JSON.stringify(sendEntry, null, 2)}`);
+
+  }  }
+
+
+
+  console.log("Enqueued transaction", sendEntry);  console.log("Enqueued transaction", sendEntry);
+
+
+
+  // Poll transaction status  // Poll transaction status
+
+  const queueId = sendEntry.id;  const queueId = sendEntry.id;
+
+  let finalStatus: unknown;  let finalStatus: unknown;
+
+  for (let attempt = 0; attempt < 10; attempt++) {  for (let attempt = 0; attempt < 10; attempt++) {
+
+    await sleep(3_000);    await sleep(3_000);
+
+    const statusResponse = await relayerRequest<    const statusResponse = await relayerRequest<
+
+      Array<      Array<
+
+        | { version: string; id: string; relayedStatus: number; receipt: unknown; rejected?: { message: string }; reverted?: { message?: string } }        | { version: string; id: string; relayedStatus: number; receipt: unknown; rejected?: { message: string }; reverted?: { message?: string } }
+
+        | { error: { id: string; message: string } }        | { error: { id: string; message: string } }
+
+      >      >
+
+    >(relayerUrl, thirdwebSecret, "relayer_getStatus", { ids: [queueId] });    >(relayerUrl, thirdwebSecret, "relayer_getStatus", { ids: [queueId] });
+
+
+
+    const statusEntry = statusResponse?.[0];    const statusEntry = statusResponse?.[0];
+
+    if (!statusEntry) {    if (!statusEntry) {
+
+      console.warn("relayer_getStatus returned empty result");      console.warn("relayer_getStatus returned empty result");
+
+      continue;      continue;
+
+    }    }
+
+    if ("error" in statusEntry) {    if ("error" in statusEntry) {
+
+      console.warn("relayer_getStatus error:", statusEntry.error);      console.warn("relayer_getStatus error:", statusEntry.error);
+
+      finalStatus = statusEntry;      finalStatus = statusEntry;
+
+      continue;      continue;
+
+    }    }
+
+
+
+    console.log(`Status poll #${attempt + 1}: relayedStatus=${statusEntry.relayedStatus}`);    console.log(`Status poll #${attempt + 1}: relayedStatus=${statusEntry.relayedStatus}`);
+
+    finalStatus = statusEntry;    finalStatus = statusEntry;
+
+    if (statusEntry.relayedStatus >= 200) break;    if (statusEntry.relayedStatus >= 200) break;
+
+  }  }
+
+
+
+  console.log("Final status:", JSON.stringify(finalStatus, null, 2));  console.log("Final status:", JSON.stringify(finalStatus, null, 2));
+
+
+
+  // Example 2: ERC20 Payment Transaction  // Example 2: ERC20 Payment Transaction
+
+  if (!tokenForQuote) return;  if (!tokenForQuote) return;
+
+
+
+  console.log("\n=== ERC20 Payment Transaction ===");  console.log("\n=== ERC20 Payment Transaction ===");
+
+  console.log(`Using token: ${tokenForQuote.symbol} (${tokenForQuote.address})`);  console.log(`Using token: ${tokenForQuote.symbol} (${tokenForQuote.address})`);
+
+
+
+  const exchangeRateResult = await relayerRequest<  const exchangeRateResult = await relayerRequest<
+
+    Array<    Array<
+
+      | {      | {
+
+          quote: { rate: number; token: { address: string; decimals: number; symbol?: string; name?: string }; minFee?: number };          quote: { rate: number; token: { address: string; decimals: number; symbol?: string; name?: string }; minFee?: number };
+
+          chainId: string;          chainId: string;
+
+          gasPrice: string;          gasPrice: string;
+
+          feeCollector: string;          feeCollector: string;
+
+          expiry: number;          expiry: number;
+
+        }        }
+
+      | { error: { id: string; message: string } }      | { error: { id: string; message: string } }
+
+    >    >
+
+  >(relayerUrl, thirdwebSecret, "relayer_getExchangeRate", [{ chainId: chainIdString, token: tokenForQuote.address }]);  >(relayerUrl, thirdwebSecret, "relayer_getExchangeRate", [{ chainId: chainIdString, token: tokenForQuote.address }]);
+
+
+
+  const exchangeData = exchangeRateResult?.[0];  const exchangeData = exchangeRateResult?.[0];
+
+  if (!exchangeData || "error" in exchangeData) {  if (!exchangeData || "error" in exchangeData) {
+
+    console.warn("Could not get exchange rate, skipping ERC20 example");    console.warn("Could not get exchange rate, skipping ERC20 example");
+
+    return;    return;
+
+  }  }
+
+
+
+  console.log(`Exchange rate: ${exchangeData.quote.rate}`);  console.log(`Exchange rate: ${exchangeData.quote.rate}`);
+
+  console.log(`Fee collector: ${exchangeData.feeCollector}`);  console.log(`Fee collector: ${exchangeData.feeCollector}`);
+
+
+
+  // Calculate gas fee in token terms  // Calculate gas fee in token terms
+
+  const estimatedGas = await eth_estimateGas(rpcClient, { from: eoaAddress, to: eoaAddress, data: "0x", value: "0x0" });  const estimatedGas = await eth_estimateGas(rpcClient, { from: eoaAddress, to: eoaAddress, data: "0x", value: "0x0" });
+
+  const gasCostInWei = estimatedGas * BigInt(exchangeData.gasPrice);  const gasCostInWei = estimatedGas * BigInt(exchangeData.gasPrice);
+
+  const feeInTokenUnits = (gasCostInWei * BigInt(Math.floor(exchangeData.quote.rate * 1e18))) / BigInt(1e18);  const feeInTokenUnits = (gasCostInWei * BigInt(Math.floor(exchangeData.quote.rate * 1e18))) / BigInt(1e18);
+
+  const minFeeInTokenUnits = exchangeData.quote.minFee  const minFeeInTokenUnits = exchangeData.quote.minFee
+
+    ? BigInt(Math.floor(exchangeData.quote.minFee * Math.pow(10, exchangeData.quote.token.decimals)))    ? BigInt(Math.floor(exchangeData.quote.minFee * Math.pow(10, exchangeData.quote.token.decimals)))
+
+    : BigInt(0);    : BigInt(0);
+
+  const feeAmount = feeInTokenUnits > minFeeInTokenUnits ? feeInTokenUnits : minFeeInTokenUnits;  const feeAmount = feeInTokenUnits > minFeeInTokenUnits ? feeInTokenUnits : minFeeInTokenUnits;
+
+
+
+  console.log(`Fee to pay: ${feeAmount} (${exchangeData.quote.token.symbol})`);  console.log(`Fee to pay: ${feeAmount} (${exchangeData.quote.token.symbol})`);
+
+
+
+  // Encode ERC20 transfer: transfer(address,uint256)  // Encode ERC20 transfer: transfer(address,uint256)
+
+  const feeCollectorPadded = exchangeData.feeCollector.toLowerCase().replace("0x", "").padStart(64, "0");  const feeCollectorPadded = exchangeData.feeCollector.toLowerCase().replace("0x", "").padStart(64, "0");
+
+  const amountPadded = feeAmount.toString(16).padStart(64, "0");  const amountPadded = feeAmount.toString(16).padStart(64, "0");
+
+  const transferCalldata = `0xa9059cbb${feeCollectorPadded}${amountPadded}` as `0x${string}`;  const transferCalldata = `0xa9059cbb${feeCollectorPadded}${amountPadded}` as `0x${string}`;
+
+
+
+  const wrappedUid2 = `0x${randomBytes(32).toString("hex")}` as `0x${string}`;  const wrappedUid2 = `0x${randomBytes(32).toString("hex")}` as `0x${string}`;
+
+  const wrappedCalls2 = {  const wrappedCalls2 = {
+
+    uid: wrappedUid2,    uid: wrappedUid2,
+
+    calls: [{ target: tokenForQuote.address as `0x${string}`, data: transferCalldata, value: "0" }],    calls: [{ target: tokenForQuote.address as `0x${string}`, data: transferCalldata, value: "0" }],
+
+  };  };
+
+
+
+  const signature2 = (await account.signTypedData({  const signature2 = (await account.signTypedData({
+
+    domain: { chainId: chain.id, name: "MinimalAccount", verifyingContract: eoaAddress, version: "1" },    domain: { chainId: chain.id, name: "MinimalAccount", verifyingContract: eoaAddress, version: "1" },
+
+    primaryType: "WrappedCalls",    primaryType: "WrappedCalls",
+
+    types: {    types: {
+
+      Call: [      Call: [
+
+        { name: "target", type: "address" },        { name: "target", type: "address" },
+
+        { name: "value", type: "uint256" },        { name: "value", type: "uint256" },
+
+        { name: "data", type: "bytes" },        { name: "data", type: "bytes" },
+
+      ],      ],
+
+      WrappedCalls: [      WrappedCalls: [
+
+        { name: "calls", type: "Call[]" },        { name: "calls", type: "Call[]" },
+
+        { name: "uid", type: "bytes32" },        { name: "uid", type: "bytes32" },
+
+      ],      ],
+
+    },    },
+
+    message: {    message: {
+
+      uid: wrappedUid2,      uid: wrappedUid2,
+
+      calls: [{ target: tokenForQuote.address as `0x${string}`, data: transferCalldata, value: BigInt(0) }],      calls: [{ target: tokenForQuote.address as `0x${string}`, data: transferCalldata, value: BigInt(0) }],
+
+    },    },
+
+  })) as `0x${string}`;  })) as `0x${string}`;
+
+
+
+  const sendResult2 = await relayerRequest<Array<{ chainId: string; id: string } | { error: { id: string; message: string } }>>(  const sendResult2 = await relayerRequest<Array<{ chainId: string; id: string } | { error: { id: string; message: string } }>>(
+
+    relayerUrl,    relayerUrl,
+
+    thirdwebSecret,    thirdwebSecret,
+
+    "relayer_sendTransaction",    "relayer_sendTransaction",
+
+    [    [
+
+      {      {
+
+        to: eoaAddress,        to: eoaAddress,
+
+        chainId: chainIdString,        chainId: chainIdString,
+
+        capabilities: {        capabilities: {
+
+          payment: { type: "erc20", token: tokenForQuote.address, data: toHex(estimatedGas, { size: 32 }) },          payment: { type: "erc20", token: tokenForQuote.address, data: toHex(estimatedGas, { size: 32 }) },
+
+        },        },
+
+        authorizationList,        authorizationList,
+
+        data: { wrappedCalls: wrappedCalls2, signature: signature2 },        data: { wrappedCalls: wrappedCalls2, signature: signature2 },
+
+      },      },
+
+    ]    ]
+
+  );  );
+
+
+
+  const sendEntry2 = sendResult2?.[0];  const sendEntry2 = sendResult2?.[0];
+
+  if (!sendEntry2 || "error" in sendEntry2) {  if (!sendEntry2 || "error" in sendEntry2) {
+
+    console.error(`Transaction failed: ${JSON.stringify(sendEntry2, null, 2)}`);    console.error(`Transaction failed: ${JSON.stringify(sendEntry2, null, 2)}`);
+
+    return;    return;
+
+  }  }
+
+
+
+  console.log("Enqueued transaction", sendEntry2);  console.log("Enqueued transaction", sendEntry2);
+
+
+
+  // Poll transaction status  // Poll transaction status
+
+  const queueId2 = sendEntry2.id;  const queueId2 = sendEntry2.id;
+
+  let finalStatus2: unknown;  let finalStatus2: unknown;
+
+  for (let attempt = 0; attempt < 10; attempt++) {  for (let attempt = 0; attempt < 10; attempt++) {
+
+    await sleep(3_000);    await sleep(3_000);
+
+    const statusResponse2 = await relayerRequest<    const statusResponse2 = await relayerRequest<
+
+      Array<      Array<
+
+        | { version: string; id: string; relayedStatus: number; receipt: unknown; rejected?: { message: string }; reverted?: { message?: string } }        | { version: string; id: string; relayedStatus: number; receipt: unknown; rejected?: { message: string }; reverted?: { message?: string } }
+
+        | { error: { id: string; message: string } }        | { error: { id: string; message: string } }
+
+      >      >
+
+    >(relayerUrl, thirdwebSecret, "relayer_getStatus", { ids: [queueId2] });    >(relayerUrl, thirdwebSecret, "relayer_getStatus", { ids: [queueId2] });
+
+
+
+    const statusEntry2 = statusResponse2?.[0];    const statusEntry2 = statusResponse2?.[0];
+
+    if (!statusEntry2) {    if (!statusEntry2) {
+
+      console.warn("relayer_getStatus returned empty result");      console.warn("relayer_getStatus returned empty result");
+
+      continue;      continue;
+
+    }    }
+
+    if ("error" in statusEntry2) {    if ("error" in statusEntry2) {
+
+      console.warn("relayer_getStatus error:", statusEntry2.error);      console.warn("relayer_getStatus error:", statusEntry2.error);
+
+      finalStatus2 = statusEntry2;      finalStatus2 = statusEntry2;
+
+      continue;      continue;
+
+    }    }
+
+
+
+    console.log(`Status poll #${attempt + 1}: relayedStatus=${statusEntry2.relayedStatus}`);    console.log(`Status poll #${attempt + 1}: relayedStatus=${statusEntry2.relayedStatus}`);
+
+    finalStatus2 = statusEntry2;    finalStatus2 = statusEntry2;
+
+    if (statusEntry2.relayedStatus >= 200) break;    if (statusEntry2.relayedStatus >= 200) break;
+
+  }  }
+
+
+
+  console.log("Final status:", JSON.stringify(finalStatus2, null, 2));  console.log("Final status:", JSON.stringify(finalStatus2, null, 2));
+
+}}
+
+              };
+
+async function relayerRequest<T>(              minFee?: number;
+
+  url: string,            };
+
+  secretKey: string,            chainId: string;
+
+  method: string,            gasPrice: string;
+
+  params?: unknown            feeCollector: string;
+
+): Promise<T | undefined> {            expiry: number;
+
+  const payload: JsonRpcRequest = {          }
+
+    jsonrpc: "2.0",        | {
+
+    id: Date.now(),            error: {
+
+    method,              id: string;
+
+    ...(params === undefined ? {} : { params }),              message: string;
+
+  };            };
+
+          }
+
+  const response = await fetch(url, {      >
+
+    method: "POST",    >(relayerUrl, thirdwebSecret, "relayer_getExchangeRate", [
+
+    headers: {      {
+
+      "content-type": "application/json",        chainId: chainIdString,
+
+      "x-secret-key": secretKey,        token: tokenForQuote.address,
+
+    },      },
+
+    body: JSON.stringify(payload),    ]);
+
+  });
+
+    const exchangeData = exchangeRateResult?.[0];
+
+  if (!response.ok) {    if (!exchangeData || "error" in exchangeData) {
+
+    throw new Error(`Relayer request failed with ${response.status}`);      console.warn("Could not get exchange rate, skipping ERC20 example");
+
+  }    } else {
+
+      console.log(`Exchange rate: ${exchangeData.quote.rate}`);
+
+  const body = (await response.json()) as RelayerResult<T>;      console.log(`Fee collector: ${exchangeData.feeCollector}`);
+
+  if (body.error) {      console.log(`Min fee: ${exchangeData.quote.minFee || "N/A"}`);
+
+    throw new Error(`${method} returned error ${body.error.code}: ${body.error.message}`);
+
+  }      // Estimate gas for the transaction
+
+  return body.result;      const estimatedGas = await eth_estimateGas(rpcClient, {
+
+}        from: eoaAddress,
+
+        to: eoaAddress,
+
+main().catch((error) => {        data: "0x",
+
+  console.error(error);        value: "0x0",
+
+  process.exit(1);      });
+
+});      console.log(`Estimated gas: ${estimatedGas}`);
+
+
+      // Calculate fee in token terms using the exchange rate
+      // rate is typically in wei per token unit
+      const gasPrice = BigInt(exchangeData.gasPrice);
+      const gasCostInWei = estimatedGas * gasPrice;
+      const feeInTokenUnits = (gasCostInWei * BigInt(Math.floor(exchangeData.quote.rate * 1e18))) / BigInt(1e18);
+      
+      // Apply minimum fee if specified
+      const minFeeInTokenUnits = exchangeData.quote.minFee 
+        ? BigInt(Math.floor(exchangeData.quote.minFee * Math.pow(10, exchangeData.quote.token.decimals)))
+        : BigInt(0);
+      const feeAmount = feeInTokenUnits > minFeeInTokenUnits ? feeInTokenUnits : minFeeInTokenUnits;
+      
+      console.log(`Fee amount to pay: ${feeAmount} (${exchangeData.quote.token.symbol})`);
+
+      // Encode ERC20 transfer function call: transfer(address to, uint256 amount)
+      // Using manual encoding for transfer(address,uint256)
+      const feeCollectorPadded = exchangeData.feeCollector.toLowerCase().replace('0x', '').padStart(64, '0');
+      const amountPadded = feeAmount.toString(16).padStart(64, '0');
+      const transferCalldata = `0xa9059cbb${feeCollectorPadded}${amountPadded}` as `0x${string}`;
+
+      const wrappedUid2 = `0x${randomBytes(32).toString("hex")}` as `0x${string}`;
+      const wrappedCalls2 = {
+        uid: wrappedUid2,
+        calls: [
+          {
+            target: tokenForQuote.address as `0x${string}`, // Transfer ERC20 token
+            data: transferCalldata,
+            value: "0",
+          },
+        ],
+      };
+
+      const signature2 = (await account.signTypedData({
+        domain: {
+          chainId: chain.id,
+          name: "MinimalAccount",
+          verifyingContract: eoaAddress,
+          version: "1",
+        },
+        primaryType: "WrappedCalls",
+        types: {
+          Call: [
+            { name: "target", type: "address" },
+            { name: "value", type: "uint256" },
+            { name: "data", type: "bytes" },
+          ],
+          WrappedCalls: [
+            { name: "calls", type: "Call[]" },
+            { name: "uid", type: "bytes32" },
+          ],
+        },
+        message: {
+          uid: wrappedUid2,
+          calls: [
+            {
+              target: tokenForQuote.address as `0x${string}`,
+              data: transferCalldata,
+              value: BigInt(0),
+            },
+          ],
+        },
+      })) as `0x${string}`;
+
+      const sendResult2 = await relayerRequest<
+        Array<
+          | {
+              chainId: string;
+              id: string;
+            }
+          | {
+              error: {
+                id: string;
+                message: string;
+              };
+            }
+        >
+      >(relayerUrl, thirdwebSecret, "relayer_sendTransaction", [
+        {
+          to: eoaAddress,
+          chainId: chainIdString,
+          capabilities: {
+            payment: {
+              type: "erc20",
+              token: tokenForQuote.address,
+              data: toHex(estimatedGas, { size: 32 }), // Gas limit estimate
+            },
+          },
+          authorizationList,
+          data: {
+            wrappedCalls: wrappedCalls2,
+            signature: signature2,
+          },
+        },
+      ]);
+
+      const sendEntry2 = sendResult2?.[0];
+      if (!sendEntry2 || "error" in sendEntry2) {
+        console.error(
+          `ERC20 relayer_sendTransaction failed: ${JSON.stringify(sendEntry2, null, 2)}`
+        );
+      } else {
+        console.log("Enqueued ERC20 transaction", sendEntry2);
+
+        const queueId2 = sendEntry2.id;
+        let finalStatus2: unknown;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          await sleep(3_000);
+          const statusResponse2 = await relayerRequest<
+            Array<
+              | {
+                  version: string;
+                  id: string;
+                  relayedStatus: number;
+                  receipt: unknown;
+                  rejected?: { message: string };
+                  reverted?: { message?: string };
+                }
+              | {
+                  error: {
+                    id: string;
+                    message: string;
+                  };
+                }
+            >
+          >(relayerUrl, thirdwebSecret, "relayer_getStatus", {
+            ids: [queueId2],
+          });
+
+          const statusEntry2 = statusResponse2?.[0];
+          if (!statusEntry2) {
+            console.warn("ERC20 relayer_getStatus returned empty result");
+            continue;
+          }
+          if ("error" in statusEntry2) {
+            console.warn("ERC20 relayer_getStatus error:", statusEntry2.error);
+            finalStatus2 = statusEntry2;
+            continue;
+          }
+
+          console.log(
+            `ERC20 Status poll #${attempt + 1}: relayedStatus=${statusEntry2.relayedStatus}`
+          );
+          finalStatus2 = statusEntry2;
+          if (statusEntry2.relayedStatus >= 200) {
+            break;
+          }
+        }
+
+        console.log(
+          "Final ERC20 relayer_getStatus result:",
+          JSON.stringify(finalStatus2, null, 2)
+        );
+      }
+    }
+  }
+}
+
+async function relayerRequest<T>(
+  url: string,
+  secretKey: string,
+  method: string,
+  params?: unknown
+): Promise<T | undefined> {
+  const payload: JsonRpcRequest = {
+    jsonrpc: "2.0",
+    id: Date.now(),
+    method,
+    ...(params === undefined ? {} : { params }),
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-secret-key": secretKey,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Relayer request failed with ${response.status} and message ${await response.text()}`);
+  }
+
+  const body = (await response.json()) as RelayerResult<T>;
+  if (body.error) {
+    throw new Error(
+      `${method} returned error ${body.error.code}: ${body.error.message}`
+    );
+  }
+  return body.result;
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+
