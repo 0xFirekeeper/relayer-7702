@@ -6,9 +6,6 @@
  *  2. Request relayer capabilities and preview available fee tokens.
  *  3. Execute a "sponsored" (gasless) transaction using the relayer.
  *  4. Execute an ERC20-fee transaction, illustrating token-based fee payment.
- *
- * The goal is to keep the code readable for presentations while mirroring
- * production behaviour as closely as possible.
  */
 import { config } from "dotenv";
 import { randomBytes } from "node:crypto";

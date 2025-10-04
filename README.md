@@ -1,57 +1,72 @@
-![tw-banner](https://github.com/thirdweb-example/node-starter/assets/57885104/24bf2701-6105-40cc-a823-e4602109467a)
+# Thirdweb 7702 Relayer Demo
 
-# node-starter
+This project contains a single TypeScript script (`index.ts`) that walks through two end-to-end examples of using Thirdweb's 7702 relayer:
 
-Starter kit to build with Node and thirdweb without additional initial configuration.
+- **Sponsored (gasless) execution** – the relayer covers gas and enqueues a transaction for a Minimal Account.
+- **ERC20-fee execution** – demonstrates paying the relayer in an ERC20 token (e.g., USDC) using the quoted exchange rate.
 
-## Installation
+It is designed for live demos, with rich logging and inline comments explaining each step so stakeholders can follow along easily.
 
-Install the template using [thirdweb create](https://portal.thirdweb.com/cli/create)
+## Prerequisites
 
-```bash
-  npx thirdweb create app --node
-```
+- Node.js 18 or later (matches the Thirdweb SDK requirements)
+- An API key created in the [Thirdweb dashboard](https://thirdweb.com/create-api-key)
+- A funded wallet on Base Sepolia capable of signing transactions
 
-## Run Locally
+## Setup
 
-Install dependencies:
-
-```bash
-  yarn
-```
-
-Run the script:
+Install dependencies once:
 
 ```bash
-  yarn start
+yarn
 ```
 
-## Environment Variables
-
-To run this project, you will need to add the following environment variables to your .env file:
+Create a `.env` file by copying `.env.example` (if provided) or creating a new file with the following values:
 
 ```bash
-WALLET_PRIVATE_KEY=paste_your_private_key_here
-THIRDWEB_SECRET_KEY=paste_your_secret_key_here
+WALLET_PRIVATE_KEY=0x...
+THIRDWEB_SECRET_KEY=************************
 ```
 
-- Generate your `THIRDWEB_SECRET_KEY` via thirdweb's [dashboard](https://thirdweb.com/create-api-key).
+- `THIRDWEB_SECRET_KEY`: API key from the Thirdweb dashboard.
+- `WALLET_PRIVATE_KEY`: Private key for the wallet that controls the Minimal Account (keep this secret).
 
-- For `WALLET_PRIVATE_KEY` export your wallet private key from your wallet.
+## Running the demo
 
-## Additional Resources
+```bash
+yarn start
+```
 
-- [Documentation](https://portal.thirdweb.com)
-- [Templates](https://thirdweb.com/templates)
-- [Video Tutorials](https://youtube.com/thirdweb_)
-- [Blog](https://blog.thirdweb.com)
+You should see logging that describes:
 
-## Contributing
+1. The relayer and chain being targeted (`baseSepolia`).
+2. The relayer capabilities and the ERC20 tokens available for payments.
+3. A sponsored transaction being submitted and polled until relayed.
+4. An ERC20-fee transaction (if a token is available), including pricing, authorization, and status polling.
 
-Contributions and [feedback](https://feedback.thirdweb.com) are always welcome!
+If an ERC20 token isn't configured, the script will skip the second example gracefully.
 
-Please visit our [open source page](https://thirdweb.com/open-source) for more information.
+## How it works
 
-## Need help?
+The script performs the following high-level actions:
 
-For help, visit our [support site](https://thirdweb.com/support).
+1. Loads environment variables and constructs a Thirdweb client & account.
+2. Fetches relayer capabilities, including fee tokens and collectors.
+3. Signs an authorization for the Minimal Account (EIP-7702 requirement).
+4. Sends a wrapped call in sponsored mode and polls `relayer_getStatus` until it finalizes.
+5. Obtains an exchange rate quote, computes the ERC20-denominated fee, encodes `transfer(address,uint256)`, and submits a token-based fee transaction.
+
+Each step logs enough context to narrate the flow during a presentation.
+
+## Troubleshooting
+
+- **Missing environment variables:** The script will throw descriptive errors if `WALLET_PRIVATE_KEY` or `THIRDWEB_SECRET_KEY` are not set.
+- **Insufficient funds:** Ensure the wallet has enough balance for ERC20 transfers when demonstrating token payments.
+- **Rate/Cap changes:** Relayer capabilities can evolve; re-run the capabilities query before presenting to confirm tokens and fee collectors.
+
+## Additional resources
+
+- [Thirdweb portal](https://portal.thirdweb.com)
+- [7702 relayer docs](https://hackmd.io/T4TkZYFQQnCupiuW231DYw?view#relayer_getExchangeRate)
+- [Support](https://thirdweb.com/support)
+
