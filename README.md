@@ -1,72 +1,128 @@
 # Thirdweb 7702 Relayer Demo
 
-This project contains a single TypeScript script (`index.ts`) that walks through two end-to-end examples of using Thirdweb's 7702 relayer:
+Demo code for integrating with Thirdweb's EIP-7702 relayer. Shows three transaction patterns: sponsored (gasless), ERC20 payment, and multichain execution.
 
-- **Sponsored (gasless) execution** – the relayer covers gas and enqueues a transaction for a Minimal Account.
-- **ERC20-fee execution** – demonstrates paying the relayer in an ERC20 token (e.g., USDC) using the quoted exchange rate.
-
-It is designed for live demos, with rich logging and inline comments explaining each step so stakeholders can follow along easily.
-
-## Prerequisites
-
-- Node.js 18 or later (matches the Thirdweb SDK requirements)
-- An API key created in the [Thirdweb dashboard](https://thirdweb.com/create-api-key)
-- A funded wallet on Base Sepolia capable of signing transactions
-
-## Setup
-
-Install dependencies once:
+## Quick Start
 
 ```bash
-yarn
-```
+# Install
+yarn install
 
-Create a `.env` file by copying `.env.example` (if provided) or creating a new file with the following values:
+# Configure
+cp .env.example .env
+# Add your WALLET_PRIVATE_KEY and THIRDWEB_SECRET_KEY
 
-```bash
-WALLET_PRIVATE_KEY=0x...
-THIRDWEB_SECRET_KEY=************************
-```
-
-- `THIRDWEB_SECRET_KEY`: API key from the Thirdweb dashboard.
-- `WALLET_PRIVATE_KEY`: Private key for the wallet that controls the Minimal Account (keep this secret).
-
-## Running the demo
-
-```bash
+# Run
 yarn start
 ```
 
-You should see logging that describes:
+## What You'll See
 
-1. The relayer and chain being targeted (`baseSepolia`).
-2. The relayer capabilities and the ERC20 tokens available for payments.
-3. A sponsored transaction being submitted and polled until relayed.
-4. An ERC20-fee transaction (if a token is available), including pricing, authorization, and status polling.
+The demo runs three examples in sequence:
 
-If an ERC20 token isn't configured, the script will skip the second example gracefully.
+1. **Sponsored Transaction** - Relayer pays gas, transaction executes for free
+2. **ERC20 Payment** - User pays gas fees in USDC instead of ETH
+3. **Multichain** - Execute transactions on Base Sepolia and Arbitrum Sepolia simultaneously
 
-## How it works
+## Project Structure
 
-The script performs the following high-level actions:
+```
+src/
+├── index.ts              # Runs all three examples
+├── types.ts              # API type definitions
+├── utils.ts              # Signing, encoding, polling helpers
+└── examples/
+    ├── sponsored.ts      # Example 1: Gasless tx
+    ├── erc20-payment.ts  # Example 2: ERC20 fee payment
+    └── multichain.ts     # Example 3: Cross-chain tx
+```
 
-1. Loads environment variables and constructs a Thirdweb client & account.
-2. Fetches relayer capabilities, including fee tokens and collectors.
-3. Signs an authorization for the Minimal Account (EIP-7702 requirement).
-4. Sends a wrapped call in sponsored mode and polls `relayer_getStatus` until it finalizes.
-5. Obtains an exchange rate quote, computes the ERC20-denominated fee, encodes `transfer(address,uint256)`, and submits a token-based fee transaction.
+## How It Works
 
-Each step logs enough context to narrate the flow during a presentation.
+### 1. Sponsored Transactions
+
+```typescript
+// User signs transaction off-chain
+const signature = await account.signTypedData({ ... });
+
+// Relayer pays gas and submits on-chain
+await relayerRequest("relayer_sendTransaction", {
+  payment: { type: "sponsored" }
+});
+```
+
+The relayer covers all gas costs. Great for onboarding or promotional campaigns.
+
+### 2. ERC20 Payment
+
+```typescript
+// Get exchange rate from relayer
+const rate = await requestExchangeRate(chainId, tokenAddress);
+
+// Calculate fee in token units
+const feeAmount = gasEstimate * gasPrice * rate;
+
+// Include token transfer in transaction batch
+const calls = [
+  { target: tokenAddress, data: encodeTransfer(feeCollector, feeAmount) },
+];
+```
+
+User pays gas fees in any supported ERC20 token. The relayer provides exchange rates and handles the conversion.
+
+### 3. Multichain Execution
+
+```typescript
+await relayerRequest("relayer_sendTransactionMultichain", [
+  { chainId: "84532", ... },   // Base Sepolia
+  { chainId: "421614", ... }   // Arbitrum Sepolia
+]);
+```
+
+Execute transactions on multiple chains with a single API call. Each chain polls its own relayer endpoint for status.
+
+## Key Concepts
+
+**EIP-7702** - EOAs can temporarily delegate to a smart contract, enabling batched transactions and custom validation logic without deploying a separate wallet contract.
+
+**Authorization Tuples** - Signed permissions that activate the EIP-7702 delegation. One per chain, includes nonce for replay protection.
+
+**WrappedCalls** - Transaction batch format with unique ID to prevent replays. Multiple calls execute atomically.
+
+## Configuration
+
+Required environment variables:
+
+```bash
+WALLET_PRIVATE_KEY=0x...           # Your private key
+THIRDWEB_SECRET_KEY=...            # API key from thirdweb.com/dashboard
+```
+
+Your wallet needs:
+
+- ETH on Base Sepolia for account upgrades
+- USDC on Base Sepolia for the ERC20 payment example (optional)
+
+## Relayer API
+
+The demo uses these JSON-RPC methods:
+
+- `relayer_getCapabilities` - List supported tokens and fee collectors
+- `relayer_getExchangeRate` - Get token-to-gas exchange rate with expiry
+- `relayer_sendTransaction` - Submit signed transaction
+- `relayer_sendTransactionMultichain` - Submit transactions across chains
+- `relayer_getStatus` - Poll transaction status until confirmed
+
+See `src/types.ts` for full API specifications.
 
 ## Troubleshooting
 
-- **Missing environment variables:** The script will throw descriptive errors if `WALLET_PRIVATE_KEY` or `THIRDWEB_SECRET_KEY` are not set.
-- **Insufficient funds:** Ensure the wallet has enough balance for ERC20 transfers when demonstrating token payments.
-- **Rate/Cap changes:** Relayer capabilities can evolve; re-run the capabilities query before presenting to confirm tokens and fee collectors.
+**Transaction stuck at status 110** - Normal, wait for block confirmation. Multichain transactions can take 30-60 seconds.
 
-## Additional resources
+**"Insufficient Payment" error** - Exchange rate expired or gas price changed. Request a fresh quote.
 
-- [Thirdweb portal](https://portal.thirdweb.com)
-- [7702 relayer docs](https://hackmd.io/T4TkZYFQQnCupiuW231DYw?view#relayer_getExchangeRate)
-- [Support](https://thirdweb.com/support)
+## Resources
+
+- [Thirdweb Dashboard](https://thirdweb.com/dashboard) - Get your API key
+- [EIP-7702 Spec](https://eips.ethereum.org/EIPS/eip-7702) - Technical details
 
