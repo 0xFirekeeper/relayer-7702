@@ -1,6 +1,6 @@
 # Thirdweb 7702 Relayer Demo
 
-Demo code for integrating with Thirdweb's EIP-7702 relayer. Shows three transaction patterns: sponsored (gasless), ERC20 payment, and multichain execution.
+Demo code for integrating with Thirdweb's EIP-7702 relayer. Shows four transaction patterns: sponsored (gasless), ERC20 payment, OKX wallet integration, and multichain execution.
 
 ## Quick Start
 
@@ -13,28 +13,32 @@ cp .env.example .env
 # Add your WALLET_PRIVATE_KEY and THIRDWEB_SECRET_KEY
 
 # Run
-yarn start
+yarn dev
 ```
 
 ## What You'll See
 
-The demo runs three examples in sequence:
+The demo runs four examples in sequence:
 
 1. **Sponsored Transaction** - Relayer pays gas, transaction executes for free
 2. **ERC20 Payment** - User pays gas fees in USDC instead of ETH
-3. **Multichain** - Execute transactions on Base Sepolia and Arbitrum Sepolia simultaneously
+3. **OKX Wallet with ERC20** - OKX wallet using executeWithRelayer with token payment
+4. **Multichain** - Execute transactions on Base Sepolia and Arbitrum Sepolia simultaneously
 
 ## Project Structure
 
 ```
 src/
-├── index.ts              # Runs all three examples
+├── index.ts              # Runs all four examples
 ├── types.ts              # API type definitions
 ├── utils.ts              # Signing, encoding, polling helpers
+├── minimal-account.ts    # Thirdweb MinimalAccount ABI
+├── okx-account.ts        # OKX Account ABI
 └── examples/
     ├── sponsored.ts      # Example 1: Gasless tx
     ├── erc20-payment.ts  # Example 2: ERC20 fee payment
-    └── multichain.ts     # Example 3: Cross-chain tx
+    ├── okx.ts            # Example 3: OKX wallet integration
+    └── multichain.ts     # Example 4: Cross-chain tx
 ```
 
 ## How It Works
@@ -70,7 +74,24 @@ const calls = [
 
 User pays gas fees in any supported ERC20 token. The relayer provides exchange rates and handles the conversion.
 
-### 3. Multichain Execution
+### 3. OKX Wallet Integration
+
+```typescript
+// OKX uses executeWithRelayer instead of executeWithSig
+const batchedCall = {
+  calls: [...],
+  nonce: 0n  // OKX uses nonce instead of uid
+};
+
+await relayerRequest("relayer_sendTransaction", {
+  data: encodeOkxExecuteWithRelayer(batchedCall, validatorData),
+  payment: { type: "token", address: tokenAddress }
+});
+```
+
+OKX wallets use a different execution function but work with the same relayer infrastructure.
+
+### 4. Multichain Execution
 
 ```typescript
 await relayerRequest("relayer_sendTransactionMultichain", [
@@ -94,9 +115,12 @@ Execute transactions on multiple chains with a single API call. Each chain polls
 Required environment variables:
 
 ```bash
-WALLET_PRIVATE_KEY=0x...           # Your private key
+WALLET_PRIVATE_KEY=0x...           # Your private key for MinimalAccount examples
+OKX_WALLET_PRIVATE_KEY=0x...       # Separate private key for OKX wallet example
 THIRDWEB_SECRET_KEY=...            # API key from thirdweb.com/dashboard
 ```
+
+**Note**: OKX example uses a separate wallet to demonstrate the different account type.
 
 Your wallet needs:
 

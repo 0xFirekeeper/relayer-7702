@@ -80,7 +80,7 @@ export async function createAuthorizationTuple(
 }
 
 /**
- * Request exchange rate for a specific token on a chain.
+ * Request fee data (exchange rate) for a specific token on a chain.
  */
 export async function requestExchangeRate(
   relayerUrl: string,
@@ -91,7 +91,7 @@ export async function requestExchangeRate(
   return await relayerRequest<ExchangeRateEntry>(
     relayerUrl,
     thirdwebSecret,
-    "relayer_getExchangeRate",
+    "relayer_getFeeData",
     {
       chainId,
       token: tokenAddress,

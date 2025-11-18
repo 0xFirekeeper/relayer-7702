@@ -55,20 +55,36 @@ export async function runErc20PaymentExample(
   });
   console.log(`Estimated gas: ${estimatedGas}`);
 
-  // Calculate the ERC20-denominated fee
+  // Calculate the fee using the correct formula from the relayer implementation
   const gasPrice = BigInt(exchangeData.gasPrice);
-  const gasCostInWei = estimatedGas * gasPrice;
-  const rateScaled = BigInt(Math.floor(parseFloat(exchangeData.rate) * 1e18));
-  const feeInTokenUnits = (gasCostInWei * rateScaled) / BigInt(1e18);
-
   const tokenDecimals = exchangeData.token.decimals;
-  const decimalScalar = Math.pow(10, tokenDecimals);
-  const minFeeInTokenUnits = exchangeData.minFee
-    ? BigInt(Math.floor(parseFloat(exchangeData.minFee) * decimalScalar))
-    : BigInt(0);
-  const feeAmount =
-    feeInTokenUnits > minFeeInTokenUnits ? feeInTokenUnits : minFeeInTokenUnits;
-  const feeAmountDisplay = Number(feeAmount) / decimalScalar;
+  
+  // Use the same scaling approach as the bundler
+  const RATE_SCALE = 1_000_000_000n;
+  const NATIVE_DECIMALS = 18n;
+  
+  // Formula: tokenFee = max(minFee, (estimatedGas × gasPrice / 10^18) × rate)
+  const gasCostInNative = (estimatedGas * gasPrice) / (10n ** NATIVE_DECIMALS);
+  
+  // Convert rate to scaled bigint (rate is already tokens-per-native, e.g., 3407 USDC/ETH)
+  const rate = parseFloat(exchangeData.rate);
+  const rateScaled = BigInt(Math.ceil(rate * Number(RATE_SCALE)));
+  
+  // Calculate required tokens in scaled units
+  const estimatedTokensScaled = rateScaled * gasCostInNative;
+  
+  // Convert minFee to scaled units
+  const minFee = exchangeData.minFee ? parseFloat(exchangeData.minFee) : 0;
+  const minFeeScaled = minFee > 0 ? BigInt(Math.ceil(minFee * Number(RATE_SCALE))) : 0n;
+  
+  // Take the max of estimated and minimum fee
+  const requiredScaled = estimatedTokensScaled > minFeeScaled ? estimatedTokensScaled : minFeeScaled;
+  
+  // Convert scaled amount to base units (adjust for token decimals)
+  const decimalsFactor = 10n ** BigInt(tokenDecimals);
+  const feeAmount = (requiredScaled * decimalsFactor + RATE_SCALE - 1n) / RATE_SCALE;
+  
+  const feeAmountDisplay = Number(feeAmount) / Math.pow(10, tokenDecimals);
 
   console.log(`Fee amount to pay: ${feeAmountDisplay} ${exchangeData.token.symbol || token.symbol || "tokens"}`);
 
@@ -127,7 +143,6 @@ export async function runErc20PaymentExample(
       payment: {
         type: "token",
         address: token.address,
-        data: exchangeData.context,
       },
       authorizationList: undefined,
     }

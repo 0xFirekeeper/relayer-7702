@@ -17,6 +17,7 @@ import { baseSepolia } from "thirdweb/chains";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import { runErc20PaymentExample } from "./examples/erc20-payment";
 import { runMultichainExample } from "./examples/multichain";
+import { runOkxExample } from "./examples/okx";
 import { runSponsoredExample } from "./examples/sponsored";
 import type { CapabilitiesResponse } from "./types";
 import { createAuthorizationTuple, relayerRequest, requestExchangeRate } from "./utils";
@@ -28,10 +29,15 @@ async function main() {
   // Setup and Configuration
   // ============================================================================
   const walletPrivateKey = process.env.WALLET_PRIVATE_KEY;
+  const okxWalletPrivateKey = process.env.OKX_WALLET_PRIVATE_KEY;
   const thirdwebSecret = process.env.THIRDWEB_SECRET_KEY;
   
   if (!walletPrivateKey || !thirdwebSecret) {
     throw new Error("Set WALLET_PRIVATE_KEY and THIRDWEB_SECRET_KEY in your .env file");
+  }
+
+  if (!okxWalletPrivateKey) {
+    throw new Error("Set OKX_WALLET_PRIVATE_KEY in your .env file for OKX example");
   }
 
   const chain = baseSepolia;
@@ -46,8 +52,11 @@ async function main() {
 
   const client = createThirdwebClient({ secretKey: thirdwebSecret });
   const account = privateKeyToAccount({ client, privateKey: walletPrivateKey });
+  const okxAccount = privateKeyToAccount({ client, privateKey: okxWalletPrivateKey });
   const eoaAddress = getAddress(account.address);
+  const okxAddress = getAddress(okxAccount.address);
   console.log("EOA address:", eoaAddress);
+  console.log("OKX wallet address:", okxAddress);
 
   // Get nonce for EIP-7702 authorization
   const rpcClient = getRpcClient({ client, chain });
@@ -59,6 +68,16 @@ async function main() {
 
   // Create EIP-7702 authorization
   const authorizationList = [await createAuthorizationTuple(account, chainId, nonce)];
+
+  // Get nonce for OKX wallet
+  const okxNonceHex = await eth_getTransactionCount(rpcClient, {
+    address: okxAddress,
+    blockTag: "pending",
+  });
+  const okxNonce = BigInt(okxNonceHex);
+
+  // Create OKX EIP-7702 authorization
+  const okxAuthorizationList = [await createAuthorizationTuple(okxAccount, chainId, okxNonce)];
 
   // ============================================================================
   // Relayer Capability Discovery
@@ -124,7 +143,24 @@ async function main() {
     console.log("\nSkipping ERC20 example - no tokens available");
   }
 
-  // Example 3: Multichain transaction
+  // Example 3: OKX wallet with ERC20 payment (if tokens available)
+  if (tokenForQuote) {
+    await runOkxExample(
+      client,
+      okxAccount,
+      relayerUrl,
+      thirdwebSecret,
+      chainId,
+      chain,
+      tokenForQuote,
+      chainCapabilities.feeCollector,
+      okxAuthorizationList
+    );
+  } else {
+    console.log("\nSkipping OKX example - no tokens available");
+  }
+
+  // Example 4: Multichain transaction
   await runMultichainExample(
     client,
     account,
