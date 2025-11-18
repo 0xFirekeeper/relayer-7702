@@ -142,34 +142,18 @@ export async function runOkxExample(
 
   const okxCalldata = (await encode(executeWithRelayerCall)) as `0x${string}`;
 
-  console.log("\n=== Debug Info for Testing ===");
-  console.log("From (EOA):", eoaAddress);
-  console.log("To (OKX Account):", eoaAddress);
-  console.log("Calldata:", okxCalldata);
-  console.log("Fee collector:", feeCollector);
-  console.log("Fee amount (base units):", feeAmount.toString());
-  console.log("User recipient:", userRecipient);
-  console.log("User amount (base units):", userTransferAmount.toString());
-  console.log("\nCURL to test simulation:");
-  console.log(`curl https://84532.rpc.thirdweb.com \\
-  -X POST \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "eth_call",
-    "params": [
-      {
-        "from": "${eoaAddress}",
-        "to": "${eoaAddress}",
-        "data": "${okxCalldata}"
-      },
-      "latest"
-    ]
-  }'`);
-  console.log("==============================\n");
-
   console.log("Submitting OKX transaction to relayer...");
+
+  const formattedAuthList = authorizationList.map((auth) => ({
+    chainId: auth[0].toString(),
+    address: auth[1],
+    nonce: auth[2],
+    yParity: auth[3],
+    r: auth[4],
+    s: auth[5],
+  }));
+  
+  console.log("Authorization list:", JSON.stringify(formattedAuthList, null, 2));
 
   // Submit the transaction to the relayer
   const taskId = await relayerRequest<string>(
@@ -184,14 +168,7 @@ export async function runOkxExample(
         type: "token",
         address: token.address,
       },
-      authorizationList: authorizationList.map((auth) => ({
-        chainId: auth[0].toString(),
-        address: auth[1],
-        nonce: auth[2],
-        yParity: auth[3],
-        r: auth[4],
-        s: auth[5],
-      })),
+      authorizationList: formattedAuthList,
     }
   );
 

@@ -58,12 +58,13 @@ export async function buildExecuteWithSigCalldata({
 export async function createAuthorizationTuple(
   account: ReturnType<typeof privateKeyToAccount>,
   chainId: number,
-  nonce: bigint
+  nonce: bigint,
+  contractAddress?: `0x${string}`
 ): Promise<AuthorizationTuple> {
   const authorization = await signAuthorization({
     account,
     request: {
-      address: THIRDWEB_MINIMAL_ACCOUNT_ADDRESS,
+      address: contractAddress || THIRDWEB_MINIMAL_ACCOUNT_ADDRESS,
       chainId,
       nonce,
     },

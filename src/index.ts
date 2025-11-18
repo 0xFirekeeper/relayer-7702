@@ -21,6 +21,7 @@ import { runOkxExample } from "./examples/okx";
 import { runSponsoredExample } from "./examples/sponsored";
 import type { CapabilitiesResponse } from "./types";
 import { createAuthorizationTuple, relayerRequest, requestExchangeRate } from "./utils";
+import { OKX_ACCOUNT_ADDRESS } from "./okx-account";
 
 config();
 
@@ -76,8 +77,8 @@ async function main() {
   });
   const okxNonce = BigInt(okxNonceHex);
 
-  // Create OKX EIP-7702 authorization
-  const okxAuthorizationList = [await createAuthorizationTuple(okxAccount, chainId, okxNonce)];
+  // Create OKX EIP-7702 authorization (with OKX account contract address)
+  const okxAuthorizationList = [await createAuthorizationTuple(okxAccount, chainId, okxNonce, OKX_ACCOUNT_ADDRESS)];
 
   // ============================================================================
   // Relayer Capability Discovery
@@ -143,7 +144,17 @@ async function main() {
     console.log("\nSkipping ERC20 example - no tokens available");
   }
 
-  // Example 3: OKX wallet with ERC20 payment (if tokens available)
+  // Example 3: Multichain transaction
+  await runMultichainExample(
+    client,
+    account,
+    relayerUrl,
+    thirdwebSecret,
+    nonce
+  );
+
+
+  // Example 4: OKX wallet with ERC20 payment (if tokens available)
   if (tokenForQuote) {
     await runOkxExample(
       client,
@@ -159,15 +170,6 @@ async function main() {
   } else {
     console.log("\nSkipping OKX example - no tokens available");
   }
-
-  // Example 4: Multichain transaction
-  await runMultichainExample(
-    client,
-    account,
-    relayerUrl,
-    thirdwebSecret,
-    nonce
-  );
 
   console.log("\n" + "=".repeat(70));
   console.log("Demo Complete!");
