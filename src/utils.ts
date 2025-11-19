@@ -75,8 +75,8 @@ export async function createAuthorizationTuple(
     authorization.address,
     authorization.nonce.toString(),
     authorization.yParity,
-    padHex(toHex(authorization.r), { size: 32 }),
-    padHex(toHex(authorization.s), { size: 32 }),
+    toHex(authorization.r),
+    toHex(authorization.s),
   ];
 }
 
